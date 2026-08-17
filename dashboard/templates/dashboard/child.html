@@ -11,24 +11,55 @@
     <li class="breadcrumb-item active" aria-current="page">{% trans "Dashboard" %}</li>
 {% endblock %}
 {% block content %}
+    <div class="d-flex justify-content-end mb-2">
+        <button class="btn btn-sm btn-outline-secondary"
+                type="button"
+                data-bs-toggle="collapse"
+                data-bs-target="#dashboard-edit"
+                aria-expanded="false"
+                aria-controls="dashboard-edit">{% trans "Edit dashboard" %}</button>
+    </div>
+    <div class="collapse mb-3" id="dashboard-edit">
+        <div class="card card-body">
+            <form method="post"
+                  action="{% url 'dashboard:dashboard-child-edit' object.slug %}">
+                {% csrf_token %}
+                <p class="mb-2">{% trans "Show, hide, and reorder the cards on this dashboard." %}</p>
+                <ul class="list-group mb-3" id="dashboard-card-list">
+                    {% for card in dashboard_cards_all %}
+                        <li class="list-group-item d-flex align-items-center"
+                            data-card-key="{{ card.key }}">
+                            <span class="btn-group btn-group-sm me-3" role="group">
+                                <button type="button"
+                                        class="btn btn-outline-secondary js-card-up"
+                                        aria-label="{% trans 'Move up' %}">&uarr;</button>
+                                <button type="button"
+                                        class="btn btn-outline-secondary js-card-down"
+                                        aria-label="{% trans 'Move down' %}">&darr;</button>
+                            </span>
+                            <div class="form-check flex-grow-1 mb-0">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       name="cards"
+                                       value="{{ card.key }}"
+                                       id="card-toggle-{{ card.key }}"
+                                       {% if card.visible %}checked{% endif %}>
+                                <label class="form-check-label" for="card-toggle-{{ card.key }}">{{ card.label }}</label>
+                            </div>
+                        </li>
+                    {% endfor %}
+                </ul>
+                <input type="hidden" name="order" id="dashboard-card-order" value="{% for card in dashboard_cards_all %}{{ card.key }}{% if not forloop.last %},{% endif %}{% endfor %}">
+                <button type="submit" class="btn btn-primary btn-sm">{% trans "Save" %}</button>
+            </form>
+        </div>
+    </div>
     <div id="dashboard-child"
          class="row"
          data-masonry='{"percentPosition": true }'>
-        <div class="col-sm-6 col-lg-4">{% card_timer_list object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_feeding_last object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_diaperchange_last object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_pumping_last object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_pumping_recent object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_sleep_last object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_medication_last object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_feeding_last_method object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_feeding_recent object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_statistics object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_sleep_recent object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_sleep_naps_day object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_tummytime_day object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_diaperchange_types object %}</div>
-        <div class="col-sm-6 col-lg-4">{% card_breastfeeding object %}</div>
+        {% for card in dashboard_cards %}
+            <div class="col-sm-6 col-lg-4">{% dashboard_card card.key object %}</div>
+        {% endfor %}
     </div>
 {% endblock %}
 {% block javascript %}
@@ -39,4 +70,43 @@
     {% else %}
         <script type="application/javascript">BabyBuddy.Dashboard.watch('dashboard-child', false);</script>
     {% endif %}
+    <script type="application/javascript">
+        // Dashboard "edit" panel: move card rows up/down and keep the hidden
+        // `order` field in sync so visibility + order save together. Degrades
+        // gracefully — without JS the hidden field already holds the current
+        // order and the checkboxes still work.
+        (function () {
+            var list = document.getElementById('dashboard-card-list');
+            var orderInput = document.getElementById('dashboard-card-order');
+            if (!list || !orderInput) {
+                return;
+            }
+            function syncOrder() {
+                var keys = [];
+                list.querySelectorAll('[data-card-key]').forEach(function (row) {
+                    keys.push(row.getAttribute('data-card-key'));
+                });
+                orderInput.value = keys.join(',');
+            }
+            list.addEventListener('click', function (event) {
+                var up = event.target.closest('.js-card-up');
+                var down = event.target.closest('.js-card-down');
+                if (!up && !down) {
+                    return;
+                }
+                var row = event.target.closest('[data-card-key]');
+                if (!row) {
+                    return;
+                }
+                if (up && row.previousElementSibling) {
+                    row.parentNode.insertBefore(row, row.previousElementSibling);
+                } else if (down && row.nextElementSibling) {
+                    row.parentNode.insertBefore(row.nextElementSibling, row);
+                }
+                syncOrder();
+            });
+            // Capture any server/client ordering drift at load time.
+            syncOrder();
+        })();
+    </script>
 {% endblock %}

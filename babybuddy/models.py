@@ -129,6 +129,17 @@ class Settings(models.Model):
         default=25,
         verbose_name=_("Items Per Page"),
     )
+    dashboard_cards = models.JSONField(
+        blank=True,
+        null=True,
+        default=None,
+        verbose_name=_("Dashboard cards"),
+        help_text=_(
+            "Per-user dashboard card visibility and order. A list of "
+            '{"key": <card key>, "visible": <bool>} entries. When empty, all '
+            "cards are shown in their default order."
+        ),
+    )
 
     def __str__(self):
         return str(format_lazy(_("{user}'s Settings"), user=self.user))
@@ -153,6 +164,64 @@ class Settings(models.Model):
         if self.dashboard_refresh_rate:
             return self.dashboard_refresh_rate.seconds * 1000
         return None
+
+    def resolve_dashboard_cards(self, include_hidden=False):
+        """
+        Merge the user's stored ``dashboard_cards`` preferences with the
+        canonical card registry to produce the ordered list of cards to render.
+
+        - Stored entries are honoured for order and visibility.
+        - Unknown/stale keys in stored prefs are dropped.
+        - Registry cards the user has never seen (not in stored prefs) are
+          appended, visible, so upstream additions appear automatically.
+
+        :param include_hidden: when True, hidden cards are included (each dict
+            carries a ``visible`` flag) — used by the edit UI. When False,
+            only visible cards are returned — used for rendering.
+        :return: list of dicts: {"key", "label", "template", "func", "visible"}.
+        """
+        # Imported here to avoid a circular import at module load time.
+        from dashboard.card_registry import (
+            CARD_REGISTRY,
+            CARD_REGISTRY_BY_KEY,
+            card_func_name,
+            card_template,
+        )
+
+        prefs = self.dashboard_cards or []
+        seen = set()
+        resolved = []
+
+        def _entry(key, visible):
+            registry_entry = CARD_REGISTRY_BY_KEY[key]
+            return {
+                "key": key,
+                "label": registry_entry["label"],
+                "template": card_template(key),
+                "func": card_func_name(key),
+                "visible": visible,
+            }
+
+        # Honour stored order/visibility, skipping unknown keys.
+        for pref in prefs:
+            if not isinstance(pref, dict):
+                continue
+            key = pref.get("key")
+            if key not in CARD_REGISTRY_BY_KEY or key in seen:
+                continue
+            seen.add(key)
+            resolved.append(_entry(key, bool(pref.get("visible", True))))
+
+        # Append registry cards the user has never configured (forward-compat).
+        for registry_entry in CARD_REGISTRY:
+            key = registry_entry["key"]
+            if key not in seen:
+                seen.add(key)
+                resolved.append(_entry(key, True))
+
+        if not include_hidden:
+            resolved = [entry for entry in resolved if entry["visible"]]
+        return resolved
 
 
 @receiver(post_save, sender=get_user_model())

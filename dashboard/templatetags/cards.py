@@ -909,3 +909,41 @@ def card_medication_last(context, child):
         "empty": not instance,
         "hide_empty": _hide_empty(context),
     }
+
+
+@register.simple_tag(takes_context=True)
+def dashboard_card(context, card_key, child=None):
+    """
+    Render a dashboard card by its registry key.
+
+    This dispatches to the per-card inclusion-tag functions defined in this
+    module (e.g. ``card_feeding_last``) and renders their template, mirroring
+    how ``{% card_feeding_last child %}`` would behave — but selected
+    dynamically by key so the dashboard can be data-driven (per-user
+    visibility/order). Unknown keys render nothing.
+    """
+    from dashboard.card_registry import (
+        CARD_REGISTRY_BY_KEY,
+        card_func_name,
+        card_template,
+    )
+
+    if card_key not in CARD_REGISTRY_BY_KEY:
+        return ""
+
+    func = globals().get(card_func_name(card_key))
+    if func is None:
+        return ""
+
+    card_context = func(context, child)
+
+    # Render exactly as an inclusion tag would (see
+    # django.template.library.InclusionNode.render): a fresh context from the
+    # returned dict, carrying the CSRF token across for forms.
+    engine = context.template.engine
+    card_template_obj = engine.get_template(card_template(card_key))
+    new_context = context.new(card_context)
+    csrf_token = context.get("csrf_token")
+    if csrf_token is not None:
+        new_context["csrf_token"] = csrf_token
+    return card_template_obj.render(new_context)
